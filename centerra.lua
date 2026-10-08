@@ -17,6 +17,640 @@
       §8 hooks             §9 visuals      §10 skins        §11 ui kit
       §12 menu (Centerra)  §13 hud         §14 loop + lifecycle
 ]]
+
+-------------------------------------------------------------------------------
+-- Centerra INSTANT UI — boots before everything else
+-------------------------------------------------------------------------------
+do
+	local Players = game:GetService("Players")
+	local TweenService = game:GetService("TweenService")
+	local UserInputService = game:GetService("UserInputService")
+	local RunService = game:GetService("RunService")
+	local LP = Players.LocalPlayer
+
+	local P = {
+		bg0 = Color3.fromRGB(8, 8, 10),
+		bg1 = Color3.fromRGB(14, 14, 17),
+		bg2 = Color3.fromRGB(20, 20, 24),
+		bg3 = Color3.fromRGB(28, 28, 34),
+		bg4 = Color3.fromRGB(38, 38, 46),
+		line = Color3.fromRGB(55, 55, 65),
+		text = Color3.fromRGB(235, 236, 240),
+		textDim = Color3.fromRGB(160, 162, 170),
+		textMute = Color3.fromRGB(110, 112, 120),
+		accent = Color3.fromRGB(180, 185, 195),
+		good = Color3.fromRGB(90, 200, 140),
+		bad = Color3.fromRGB(220, 90, 90),
+	}
+	local TW = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local TW_SPRING = TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+
+	local function corner(o, r)
+		local c = Instance.new("UICorner")
+		c.CornerRadius = UDim.new(0, r or 10)
+		c.Parent = o
+		return c
+	end
+	local function stroke(o, col, th, tr)
+		local s = Instance.new("UIStroke")
+		s.Color = col or P.line
+		s.Thickness = th or 1
+		s.Transparency = tr or 0.4
+		s.Parent = o
+		return s
+	end
+	local function label(parent, str, size, col, bold)
+		local t = Instance.new("TextLabel")
+		t.BackgroundTransparency = 1
+		t.Text = str or ""
+		t.TextSize = size or 13
+		t.TextColor3 = col or P.text
+		t.Font = bold and Enum.Font.GothamBold or Enum.Font.GothamMedium
+		t.TextXAlignment = Enum.TextXAlignment.Left
+		t.Parent = parent
+		return t
+	end
+	local function glass(parent, r)
+		local f = Instance.new("Frame")
+		f.BackgroundColor3 = P.bg1
+		f.BackgroundTransparency = 0.15
+		f.BorderSizePixel = 0
+		f.Parent = parent
+		corner(f, r or 12)
+		stroke(f, P.line, 1, 0.4)
+		local lip = Instance.new("Frame")
+		lip.BackgroundColor3 = Color3.new(1,1,1)
+		lip.BackgroundTransparency = 0.93
+		lip.BorderSizePixel = 0
+		lip.Size = UDim2.new(1, -2, 0, 1)
+		lip.Position = UDim2.new(0, 1, 0, 1)
+		lip.Parent = f
+		corner(lip, r or 12)
+		return f
+	end
+
+	local function getCfg()
+		local g = (type(getgenv) == "function" and getgenv()) or _G
+		local st = g.CenterraState
+		if type(st) == "table" and type(st.cfg) == "table" then
+			return st.cfg, st
+		end
+		-- fallback live table so toggles still work before init finishes
+		g._CenterraCfgFallback = g._CenterraCfgFallback or {}
+		return g._CenterraCfgFallback, st
+	end
+
+	local function setMenuOpen(v)
+		local g = (type(getgenv) == "function" and getgenv()) or _G
+		local st = g.CenterraState
+		if type(st) == "table" then st.menuOpen = v end
+	end
+
+	local gui, host, open = nil, nil, false
+	local pages, activeTab = {}, "combat"
+
+	local TABS = {
+		{id="combat",  name="Combat"},
+		{id="silent",  name="Silent"},
+		{id="rage",    name="Rage"},
+		{id="visuals", name="Visuals"},
+		{id="world",   name="World"},
+		{id="misc",    name="Misc"},
+		{id="config",  name="Config"},
+	}
+
+	local function makeToggle(parent, name, key, desc)
+		local row = glass(parent, 10)
+		row.Size = UDim2.new(1, 0, 0, desc and 52 or 38)
+		row.BackgroundTransparency = 0.28
+
+		local n = label(row, name, 13, P.text)
+		n.Position = UDim2.new(0, 14, 0, desc and 4 or 0)
+		n.Size = UDim2.new(1, -70, 0, desc and 20 or 38)
+
+		if desc then
+			local d = label(row, desc, 11, P.textMute)
+			d.Position = UDim2.new(0, 14, 0, 24)
+			d.Size = UDim2.new(1, -70, 0, 18)
+		end
+
+		local track = Instance.new("Frame")
+		track.AnchorPoint = Vector2.new(1, 0.5)
+		track.Position = UDim2.new(1, -14, 0.5, 0)
+		track.Size = UDim2.new(0, 40, 0, 22)
+		track.BackgroundColor3 = P.bg4
+		track.BorderSizePixel = 0
+		track.Parent = row
+		corner(track, 11)
+		stroke(track, P.line, 1, 0.4)
+
+		local knob = Instance.new("Frame")
+		knob.Size = UDim2.new(0, 16, 0, 16)
+		knob.Position = UDim2.new(0, 3, 0.5, -8)
+		knob.BackgroundColor3 = P.textDim
+		knob.BorderSizePixel = 0
+		knob.Parent = track
+		corner(knob, 8)
+
+		local function paint(on)
+			TweenService:Create(track, TW, {BackgroundColor3 = on and Color3.fromRGB(70,75,88) or P.bg4}):Play()
+			TweenService:Create(knob, TW, {
+				Position = on and UDim2.new(0, 21, 0.5, -8) or UDim2.new(0, 3, 0.5, -8),
+				BackgroundColor3 = on and P.text or P.textDim
+			}):Play()
+		end
+
+		local cfg = getCfg()
+		paint(cfg[key] == true)
+
+		local btn = Instance.new("TextButton")
+		btn.BackgroundTransparency = 1
+		btn.Size = UDim2.fromScale(1, 1)
+		btn.Text = ""
+		btn.Parent = row
+		btn.MouseButton1Click:Connect(function()
+			local c = getCfg()
+			c[key] = not c[key]
+			paint(c[key] == true)
+		end)
+		return row
+	end
+
+	local function makeSlider(parent, name, key, min, max, step)
+		step = step or 1
+		local row = glass(parent, 10)
+		row.Size = UDim2.new(1, 0, 0, 54)
+		row.BackgroundTransparency = 0.28
+
+		local n = label(row, name, 13, P.text)
+		n.Position = UDim2.new(0, 14, 0, 4)
+		n.Size = UDim2.new(1, -80, 0, 18)
+
+		local valL = label(row, "", 12, P.accent, true)
+		valL.AnchorPoint = Vector2.new(1, 0)
+		valL.Position = UDim2.new(1, -14, 0, 4)
+		valL.Size = UDim2.new(0, 64, 0, 18)
+		valL.TextXAlignment = Enum.TextXAlignment.Right
+
+		local track = Instance.new("Frame")
+		track.BackgroundColor3 = P.bg4
+		track.BorderSizePixel = 0
+		track.Position = UDim2.new(0, 14, 0, 32)
+		track.Size = UDim2.new(1, -28, 0, 6)
+		track.Parent = row
+		corner(track, 3)
+
+		local fill = Instance.new("Frame")
+		fill.BackgroundColor3 = P.accent
+		fill.BackgroundTransparency = 0.3
+		fill.BorderSizePixel = 0
+		fill.Size = UDim2.new(0, 0, 1, 0)
+		fill.Parent = track
+		corner(fill, 3)
+
+		local knob = Instance.new("Frame")
+		knob.Size = UDim2.new(0, 14, 0, 14)
+		knob.AnchorPoint = Vector2.new(0.5, 0.5)
+		knob.BackgroundColor3 = P.text
+		knob.BorderSizePixel = 0
+		knob.Parent = track
+		corner(knob, 7)
+
+		local function setVis(v)
+			local a = math.clamp((v - min) / (max - min), 0, 1)
+			fill.Size = UDim2.new(a, 0, 1, 0)
+			knob.Position = UDim2.new(a, 0, 0.5, 0)
+			valL.Text = tostring(math.floor(v * 100 + 0.5) / 100)
+		end
+
+		local c0 = getCfg()
+		local cur = tonumber(c0[key]) or min
+		setVis(math.clamp(cur, min, max))
+
+		local dragging = false
+		local hit = Instance.new("TextButton")
+		hit.BackgroundTransparency = 1
+		hit.Size = UDim2.new(1, 0, 0, 22)
+		hit.Position = UDim2.new(0, 0, 0, 24)
+		hit.Text = ""
+		hit.Parent = row
+
+		local function apply(x)
+			local rel = math.clamp((x - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X, 1), 0, 1)
+			local raw = min + rel * (max - min)
+			local stepped = math.floor((raw - min) / step + 0.5) * step + min
+			stepped = math.clamp(stepped, min, max)
+			local c = getCfg()
+			c[key] = stepped
+			setVis(stepped)
+		end
+
+		hit.MouseButton1Down:Connect(function()
+			dragging = true
+			apply(UserInputService:GetMouseLocation().X)
+		end)
+		UserInputService.InputEnded:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+		end)
+		UserInputService.InputChanged:Connect(function(i)
+			if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
+				apply(i.Position.X)
+			end
+		end)
+		return row
+	end
+
+	local function makeSection(parent, title)
+		local w = Instance.new("Frame")
+		w.BackgroundTransparency = 1
+		w.Size = UDim2.new(1, 0, 0, 26)
+		w.Parent = parent
+		local bar = Instance.new("Frame")
+		bar.BackgroundColor3 = P.accent
+		bar.BackgroundTransparency = 0.5
+		bar.BorderSizePixel = 0
+		bar.Size = UDim2.new(0, 3, 0, 12)
+		bar.Position = UDim2.new(0, 0, 0.5, -6)
+		bar.Parent = w
+		corner(bar, 2)
+		local t = label(w, string.upper(title), 11, P.textMute, true)
+		t.Position = UDim2.new(0, 12, 0, 0)
+		t.Size = UDim2.new(1, -12, 1, 0)
+		return w
+	end
+
+	local function makeButton(parent, text, fn, danger)
+		local row = glass(parent, 10)
+		row.Size = UDim2.new(1, 0, 0, 38)
+		row.BackgroundTransparency = 0.2
+		if danger then row.BackgroundColor3 = Color3.fromRGB(40, 14, 14) end
+		local t = label(row, text, 13, danger and P.bad or P.text, true)
+		t.Size = UDim2.fromScale(1, 1)
+		t.TextXAlignment = Enum.TextXAlignment.Center
+		local btn = Instance.new("TextButton")
+		btn.BackgroundTransparency = 1
+		btn.Size = UDim2.fromScale(1, 1)
+		btn.Text = ""
+		btn.Parent = row
+		btn.MouseButton1Click:Connect(function() if fn then pcall(fn) end end)
+		return row
+	end
+
+	local function parentGui()
+		local hui
+		pcall(function()
+			local gh = rawget(_G, "gethui") or rawget(_G, "get_hidden_gui")
+			if type(gh) ~= "function" and type(getgenv) == "function" then
+				local ok, env = pcall(getgenv)
+				if ok and type(env) == "table" then gh = env.gethui or env.get_hidden_gui end
+			end
+			if type(gh) == "function" then hui = gh() end
+		end)
+		local pg = LP and (LP:FindFirstChildOfClass("PlayerGui") or LP:FindFirstChild("PlayerGui"))
+		return hui or pg or game:GetService("CoreGui")
+	end
+
+	local function build()
+		if gui then pcall(function() gui:Destroy() end) end
+
+		gui = Instance.new("ScreenGui")
+		gui.Name = "Centerra"
+		gui.ResetOnSpawn = false
+		gui.IgnoreGuiInset = true
+		gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+		gui.DisplayOrder = 9999
+		gui.Parent = parentGui()
+
+		host = glass(gui, 16)
+		host.Name = "Host"
+		host.AnchorPoint = Vector2.new(0.5, 0.5)
+		host.Position = UDim2.fromScale(0.5, 0.5)
+		host.Size = UDim2.new(0, 720, 0, 480)
+		host.BackgroundColor3 = P.bg0
+		host.BackgroundTransparency = 0.06
+		host.ClipsDescendants = true
+		stroke(host, P.line, 1.2, 0.3)
+
+		-- rail
+		local rail = Instance.new("Frame")
+		rail.BackgroundColor3 = P.bg1
+		rail.BackgroundTransparency = 0.15
+		rail.BorderSizePixel = 0
+		rail.Size = UDim2.new(0, 150, 1, 0)
+		rail.Parent = host
+		corner(rail, 16)
+
+		-- logo
+		local mark = glass(rail, 10)
+		mark.Size = UDim2.new(0, 32, 0, 32)
+		mark.Position = UDim2.new(0, 14, 0, 16)
+		mark.BackgroundTransparency = 0.1
+		local mc = label(mark, "C", 16, P.text, true)
+		mc.Size = UDim2.fromScale(1, 1)
+		mc.TextXAlignment = Enum.TextXAlignment.Center
+
+		local word = label(rail, "centerra", 14, P.text, true)
+		word.Position = UDim2.new(0, 52, 0, 16)
+		word.Size = UDim2.new(1, -60, 0, 18)
+		local sub = label(rail, "v1.0", 11, P.textMute)
+		sub.Position = UDim2.new(0, 52, 0, 34)
+		sub.Size = UDim2.new(1, -60, 0, 14)
+
+		local tabList = Instance.new("Frame")
+		tabList.BackgroundTransparency = 1
+		tabList.Position = UDim2.new(0, 8, 0, 60)
+		tabList.Size = UDim2.new(1, -16, 1, -90)
+		tabList.Parent = rail
+		local ll = Instance.new("UIListLayout")
+		ll.Padding = UDim.new(0, 4)
+		ll.Parent = tabList
+
+		-- content
+		local content = Instance.new("Frame")
+		content.BackgroundTransparency = 1
+		content.Position = UDim2.new(0, 150, 0, 0)
+		content.Size = UDim2.new(1, -150, 1, 0)
+		content.Parent = host
+
+		local pageTitle = label(content, "Combat", 17, P.text, true)
+		pageTitle.Position = UDim2.new(0, 20, 0, 14)
+		pageTitle.Size = UDim2.new(1, -40, 0, 24)
+
+		local scroll = Instance.new("ScrollingFrame")
+		scroll.BackgroundTransparency = 1
+		scroll.BorderSizePixel = 0
+		scroll.Position = UDim2.new(0, 0, 0, 48)
+		scroll.Size = UDim2.new(1, 0, 1, -48)
+		scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+		scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		scroll.ScrollBarThickness = 3
+		scroll.ScrollBarImageColor3 = P.line
+		scroll.Parent = content
+		local sp = Instance.new("UIPadding")
+		sp.PaddingLeft = UDim.new(0, 18)
+		sp.PaddingRight = UDim.new(0, 18)
+		sp.PaddingBottom = UDim.new(0, 18)
+		sp.PaddingTop = UDim.new(0, 4)
+		sp.Parent = scroll
+
+		pages = {}
+		for _, t in ipairs(TABS) do
+			local page = Instance.new("Frame")
+			page.Name = t.id
+			page.BackgroundTransparency = 1
+			page.Size = UDim2.new(1, 0, 0, 0)
+			page.AutomaticSize = Enum.AutomaticSize.Y
+			page.Visible = false
+			page.Parent = scroll
+			local pl = Instance.new("UIListLayout")
+			pl.Padding = UDim.new(0, 7)
+			pl.Parent = page
+			pages[t.id] = page
+		end
+
+		local function showTab(id)
+			activeTab = id
+			for pid, page in pairs(pages) do
+				page.Visible = (pid == id)
+			end
+			for _, t in ipairs(TABS) do
+				if t.id == id then pageTitle.Text = t.name end
+			end
+			for _, ch in ipairs(tabList:GetChildren()) do
+				if ch:IsA("TextButton") then
+					local on = ch.Name == "t_" .. id
+					ch.BackgroundTransparency = on and 0.2 or 0.85
+					local lb = ch:FindFirstChild("Lb")
+					if lb then lb.TextColor3 = on and P.text or P.textDim end
+				end
+			end
+		end
+
+		for i, t in ipairs(TABS) do
+			local tb = Instance.new("TextButton")
+			tb.Name = "t_" .. t.id
+			tb.BackgroundColor3 = P.bg3
+			tb.BackgroundTransparency = 0.85
+			tb.BorderSizePixel = 0
+			tb.Size = UDim2.new(1, 0, 0, 34)
+			tb.Text = ""
+			tb.LayoutOrder = i
+			tb.Parent = tabList
+			corner(tb, 9)
+			local lb = label(tb, t.name, 13, P.textDim)
+			lb.Name = "Lb"
+			lb.Position = UDim2.new(0, 12, 0, 0)
+			lb.Size = UDim2.new(1, -16, 1, 0)
+			tb.MouseButton1Click:Connect(function() showTab(t.id) end)
+		end
+
+		local foot = label(rail, "RSHIFT toggle", 10, P.textMute)
+		foot.AnchorPoint = Vector2.new(0, 1)
+		foot.Position = UDim2.new(0, 14, 1, -14)
+		foot.Size = UDim2.new(1, -20, 0, 14)
+
+		-- populate
+		local combat = pages.combat
+		makeSection(combat, "Aimbot")
+		makeToggle(combat, "Aimbot", "aimbot", "Soft aim while holding aim key")
+		makeSlider(combat, "FOV", "aimFov", 20, 400, 1)
+		makeSlider(combat, "Smooth", "aimSmooth", 1, 40, 1)
+		makeSlider(combat, "Strength %", "aimStrength", 5, 100, 1)
+		makeToggle(combat, "Sticky aim", "stickyAim")
+		makeToggle(combat, "Team check", "teamCheck")
+		makeSection(combat, "Triggerbot")
+		makeToggle(combat, "Legit trigger", "legitTrigger")
+		makeSlider(combat, "Trigger delay ms", "legitTriggerDelayMs", 0, 500, 5)
+
+		local silent = pages.silent
+		makeSection(silent, "Silent aim")
+		makeToggle(silent, "Silent aim", "silentAim")
+		makeSlider(silent, "Silent FOV", "silentFov", 20, 800, 1)
+		makeToggle(silent, "360 FOV", "silentFov360")
+		makeSlider(silent, "Hit chance %", "silentHitChance", 0, 100, 1)
+		makeToggle(silent, "Wallbang", "silentWallbang")
+		makeToggle(silent, "Resolver", "resolver")
+		makeToggle(silent, "Anti-under", "antiUnder")
+		makeSection(silent, "Auto shoot")
+		makeToggle(silent, "Auto shoot", "autoShoot")
+		makeToggle(silent, "Hold fire", "autoShootHold")
+		makeSlider(silent, "Shot chance %", "autoShootChance", 10, 100, 1)
+
+		local rage = pages.rage
+		makeSection(rage, "Ragebot")
+		makeToggle(rage, "Rage enabled", "rageEnabled")
+		makeToggle(rage, "Magic bullet", "magicBullet")
+		makeToggle(rage, "Autokill", "autokill")
+		makeToggle(rage, "Voidspam", "voidSpam")
+		makeToggle(rage, "Defense hide", "defenseHide")
+		makeToggle(rage, "Melee rage", "meleeRage")
+		makeToggle(rage, "Noclip", "noclip")
+		makeSection(rage, "Weapon")
+		makeToggle(rage, "No spread", "noSpread")
+		makeToggle(rage, "No recoil", "noRecoil")
+		makeToggle(rage, "Rapid fire", "rapidFire")
+		makeSlider(rage, "Rapid mult", "rapidFireMult", 0.05, 1, 0.05)
+
+		local visuals = pages.visuals
+		makeSection(visuals, "ESP")
+		makeToggle(visuals, "ESP", "esp")
+		makeToggle(visuals, "Boxes", "espBox")
+		makeToggle(visuals, "Names", "espNames")
+		makeToggle(visuals, "Health bar", "espHealthBar")
+		makeToggle(visuals, "Distance", "espDistance")
+		makeToggle(visuals, "Weapon", "espWeapon")
+		makeToggle(visuals, "Tracers", "espTracers")
+		makeToggle(visuals, "Arrows", "espArrows")
+		makeToggle(visuals, "Skeleton", "espSkeleton")
+		makeToggle(visuals, "Highlight", "espHighlight")
+		makeSection(visuals, "Overlay")
+		makeToggle(visuals, "Show FOV", "showFov")
+		makeToggle(visuals, "Hit markers", "hitMarkers")
+		makeToggle(visuals, "Kill feed", "killFeed")
+		makeToggle(visuals, "Radar", "radar")
+		makeToggle(visuals, "HUD", "hud")
+
+		local world = pages.world
+		makeSection(world, "Lighting")
+		makeToggle(world, "Fullbright", "fullbright")
+		makeToggle(world, "Night mode", "nightMode")
+		makeToggle(world, "No fog", "noFog")
+		makeToggle(world, "FOV changer", "fovChanger")
+		makeSlider(world, "FOV", "fov", 60, 120, 1)
+		makeSection(world, "Camera")
+		makeToggle(world, "Third person", "thirdPerson")
+		makeToggle(world, "No post FX", "noPostFx")
+		makeToggle(world, "Hide viewmodel", "hideViewmodel")
+
+		local misc = pages.misc
+		makeSection(misc, "Movement")
+		makeToggle(misc, "Speed boost", "speedBoost")
+		makeSlider(misc, "Speed mult", "speedMult", 1, 5, 0.05)
+		makeToggle(misc, "Bhop", "bhop")
+		makeToggle(misc, "Infinite slide", "infSlide")
+		makeToggle(misc, "No slow", "noSlow")
+		makeSection(misc, "Utility")
+		makeToggle(misc, "Anti AFK", "antiAfk")
+		makeToggle(misc, "Auto rejoin", "autoRejoin")
+		makeToggle(misc, "Unlock cosmetics", "unlockCosmetics")
+		makeToggle(misc, "Anti-aim", "aaEnabled")
+
+		local config = pages.config
+		makeSection(config, "Actions")
+		makeButton(config, "Save config", function()
+			local g = (type(getgenv) == "function" and getgenv()) or _G
+			local st = g.CenterraState
+			if st and st.configs and st.configs.save then pcall(st.configs.save) end
+		end)
+		makeButton(config, "Reset defaults", function()
+			local g = (type(getgenv) == "function" and getgenv()) or _G
+			local st = g.CenterraState
+			if st and st.configs and st.configs.reset then pcall(st.configs.reset) end
+		end)
+		makeButton(config, "Unload Centerra", function()
+			local g = (type(getgenv) == "function" and getgenv()) or _G
+			if type(g.CenterraUnload) == "function" then pcall(g.CenterraUnload) end
+			if gui then gui:Destroy() end
+		end, true)
+		makeSection(config, "About")
+		local about = glass(config, 10)
+		about.Size = UDim2.new(1, 0, 0, 64)
+		about.BackgroundTransparency = 0.28
+		local at = label(about, "Centerra v1.0\nGlass UI · wired to live cfg\nNo license · no telemetry", 12, P.textDim)
+		at.Position = UDim2.new(0, 14, 0, 10)
+		at.Size = UDim2.new(1, -28, 1, -16)
+		at.TextYAlignment = Enum.TextYAlignment.Top
+		at.TextWrapped = true
+
+		showTab("combat")
+
+		-- drag
+		local dragging, d0, p0
+		local dragBar = Instance.new("TextButton")
+		dragBar.BackgroundTransparency = 1
+		dragBar.Size = UDim2.new(1, -150, 0, 48)
+		dragBar.Position = UDim2.new(0, 150, 0, 0)
+		dragBar.Text = ""
+		dragBar.Parent = host
+		dragBar.MouseButton1Down:Connect(function()
+			dragging = true
+			d0 = UserInputService:GetMouseLocation()
+			p0 = host.Position
+		end)
+		UserInputService.InputEnded:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+		end)
+		UserInputService.InputChanged:Connect(function(i)
+			if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
+				local m = UserInputService:GetMouseLocation()
+				local d = m - d0
+				host.Position = UDim2.new(p0.X.Scale, p0.X.Offset + d.X, p0.Y.Scale, p0.Y.Offset + d.Y)
+			end
+		end)
+
+		host.Visible = false
+		return gui
+	end
+
+	local function setOpen(v)
+		if not host then build() end
+		open = v
+		host.Visible = v
+		setMenuOpen(v)
+		if v then
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			UserInputService.MouseIconEnabled = true
+			host.Size = UDim2.new(0, 720, 0, 460)
+			TweenService:Create(host, TW_SPRING, {Size = UDim2.new(0, 720, 0, 480)}):Play()
+		end
+	end
+
+	local function toggle()
+		setOpen(not open)
+	end
+
+	-- build now
+	local ok, err = pcall(build)
+	if not ok then
+		warn("[centerra] instant UI build failed: " .. tostring(err))
+	else
+		-- open immediately
+		setOpen(true)
+		print("[centerra] glass UI live — RightShift toggles")
+	end
+
+	UserInputService.InputBegan:Connect(function(input, gp)
+		if gp then return end
+		if input.KeyCode == Enum.KeyCode.RightShift then
+			toggle()
+		elseif input.KeyCode == Enum.KeyCode.O and (UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)) then
+			toggle()
+		end
+	end)
+
+	local g = (type(getgenv) == "function" and getgenv()) or _G
+	g.CenterraToggleUI = toggle
+	g.CenterraInstantUI = true
+
+	-- when real cfg appears, copy fallback keys into it so early toggles stick
+	task.spawn(function()
+		local t0 = os.clock()
+		while os.clock() - t0 < 30 do
+			local st = g.CenterraState
+			if type(st) == "table" and type(st.cfg) == "table" and g._CenterraCfgFallback then
+				for k, v in pairs(g._CenterraCfgFallback) do
+					st.cfg[k] = v
+				end
+				g._CenterraCfgFallback = nil
+				print("[centerra] cfg synced from UI fallback")
+				break
+			end
+			task.wait(0.25)
+		end
+	end)
+end
+
+
 pcall(function() (getgenv and getgenv() or _G).CenterraEdition = "normal" end)
 
 -------------------------------------------------------------------------------
