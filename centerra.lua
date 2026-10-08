@@ -1,7 +1,7 @@
 --[[
 	Centerra v1.0 — RIVALS
-	UI loads first. Combat loads after via loadstring.
-	RightShift toggles menu.
+	UI first · combat after · toggles single-click latch
+	RightShift toggles menu
 ]]
 
 pcall(function()
@@ -568,14 +568,17 @@ function Library:OnHighlight(HighlightInstance, Instance, Properties, Properties
 end;
 
 function Library:MouseIsOverOpenedFrame()
+    -- only block if an actual opened dropdown/colorpicker is under the cursor
     for Frame, _ in next, Library.OpenedFrames do
-        local AbsPos, AbsSize = Frame.AbsolutePosition, Frame.AbsoluteSize;
-        if Mouse.X >= AbsPos.X and Mouse.X <= AbsPos.X + AbsSize.X
-            and Mouse.Y >= AbsPos.Y and Mouse.Y <= AbsPos.Y + AbsSize.Y then
-
-            return true;
+        if Frame and Frame.Parent and Frame.Visible then
+            local AbsPos, AbsSize = Frame.AbsolutePosition, Frame.AbsoluteSize;
+            if Mouse.X >= AbsPos.X and Mouse.X <= AbsPos.X + AbsSize.X
+                and Mouse.Y >= AbsPos.Y and Mouse.Y <= AbsPos.Y + AbsSize.Y then
+                return true;
+            end;
         end;
     end;
+    return false;
 end;
 
 function Library:IsMouseOverFrame(Frame)
@@ -2355,19 +2358,13 @@ do
             Library:SafeCallback(Toggle.Changed, Toggle.Value);
             Library:UpdateDependencyBoxes();
         end;
-        local function toggleClick()
+        -- single click path only (InputBegan + MouseButton1Click would double-toggle)
+        ToggleRegion.MouseButton1Click:Connect(function()
             if Library:MouseIsOverOpenedFrame() then return end
             Toggle:SetValue(not Toggle.Value)
             Library:AttemptSave()
-        end
-        ToggleRegion.InputBegan:Connect(function(Input)
-            if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-                toggleClick()
-            end
         end)
-        if ToggleRegion:IsA('TextButton') then
-            ToggleRegion.MouseButton1Click:Connect(toggleClick)
-        end
+        ToggleRegion.MouseButton1Down:Connect(function() end) -- absorb
         if Toggle.Risky then
             Library:RemoveFromRegistry(ToggleLabel)
             ToggleLabel.TextColor3 = Library.RiskColor
@@ -4690,41 +4687,17 @@ end
 			warn("[centerra] menu compile: " .. tostring(err))
 		else
 			local ok, result = pcall(fn)
-			if ok then
-				buildMenu = result
-			else
-				warn("[centerra] menu run: " .. tostring(result))
-			end
+			if ok then buildMenu = result else warn("[centerra] menu run: " .. tostring(result)) end
 		end
 	end
-
 	if type(buildMenu) == "function" then
 		local ok, err = pcall(buildMenu, Library)
 		if ok then
 			print("[centerra] menu live — RightShift toggles")
 		else
 			warn("[centerra] buildMenu: " .. tostring(err))
-			pcall(function()
-				local Window = Library:CreateWindow({
-					Title = "centerra",
-					Center = true,
-					AutoShow = true,
-					Size = UDim2.fromOffset(520, 400),
-				})
-				Window:AddTab("Main"):AddLeftGroupbox("Status"):AddLabel(tostring(err):sub(1, 80))
-			end)
 		end
-	else
-		pcall(function()
-			Library:CreateWindow({
-				Title = "centerra",
-				Center = true,
-				AutoShow = true,
-				Size = UDim2.fromOffset(520, 400),
-			})
-		end)
 	end
-
 	local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
 	if type(g) ~= "table" then g = _G end
 	g.CenterraLibrary = Library
@@ -4734,9 +4707,6 @@ end
 end
 
 
--------------------------------------------------------------------------------
--- Combat core (isolated loadstring — cannot break UI parse)
--------------------------------------------------------------------------------
 task.defer(function()
 	print("[centerra] loading combat core…")
 	local fn, err = loadstring([=[
@@ -40264,13 +40234,11 @@ end
 	end
 	print("[centerra] combat core live")
 	local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
-	if type(g) == "table" and type(g.CenterraState) == "table" and type(g.CenterraState.cfg) == "table" then
-		if type(g._CenterraCfgFallback) == "table" then
-			for k, v in pairs(g._CenterraCfgFallback) do
-				g.CenterraState.cfg[k] = v
-			end
-			g._CenterraCfgFallback = nil
-			print("[centerra] cfg synced")
+	if type(g) == "table" and type(g.CenterraState) == "table" and type(g.CenterraState.cfg) == "table" and type(g._CenterraCfgFallback) == "table" then
+		for k, v in pairs(g._CenterraCfgFallback) do
+			g.CenterraState.cfg[k] = v
 		end
+		g._CenterraCfgFallback = nil
+		print("[centerra] cfg synced")
 	end
 end)
