@@ -1,7 +1,7 @@
 --[[
 	Centerra v1.0 — RIVALS
-	Linoria UI + full combat core
-	RightShift toggles · buttons write live cfg · mouse freed while menu open
+	UI loads first. Combat loads after via loadstring.
+	RightShift toggles menu.
 ]]
 
 pcall(function()
@@ -4304,19 +4304,21 @@ return Library
 		warn("[centerra] linoria compile: " .. tostring(err))
 	else
 		local ok, result = pcall(fn)
-		if ok then
+		if not ok then
+			warn("[centerra] linoria run: " .. tostring(result))
+		else
 			Library = result
 			if type(Library) ~= "table" then
 				local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
 				Library = type(g) == "table" and g.Library or nil
 			end
-		else
-			warn("[centerra] linoria run: " .. tostring(result))
 		end
 	end
 end
 
-if type(Library) == "table" and type(Library.CreateWindow) == "function" then
+if type(Library) ~= "table" or type(Library.CreateWindow) ~= "function" then
+	warn("[centerra] Library failed — no UI")
+else
 	print("[centerra] linoria ready")
 	local buildMenu
 	do
@@ -4684,33 +4686,60 @@ return function(Library)
 end
 
 ]=], "centerra_menu")
-		if fn then
-			local ok, result = pcall(fn)
-			if ok then buildMenu = result end
-		else
+		if not fn then
 			warn("[centerra] menu compile: " .. tostring(err))
+		else
+			local ok, result = pcall(fn)
+			if ok then
+				buildMenu = result
+			else
+				warn("[centerra] menu run: " .. tostring(result))
+			end
 		end
 	end
+
 	if type(buildMenu) == "function" then
 		local ok, err = pcall(buildMenu, Library)
 		if ok then
 			print("[centerra] menu live — RightShift toggles")
 		else
 			warn("[centerra] buildMenu: " .. tostring(err))
+			pcall(function()
+				local Window = Library:CreateWindow({
+					Title = "centerra",
+					Center = true,
+					AutoShow = true,
+					Size = UDim2.fromOffset(520, 400),
+				})
+				Window:AddTab("Main"):AddLeftGroupbox("Status"):AddLabel(tostring(err):sub(1, 80))
+			end)
 		end
+	else
+		pcall(function()
+			Library:CreateWindow({
+				Title = "centerra",
+				Center = true,
+				AutoShow = true,
+				Size = UDim2.fromOffset(520, 400),
+			})
+		end)
 	end
+
 	local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
 	if type(g) ~= "table" then g = _G end
 	g.CenterraLibrary = Library
 	g.CenterraToggleUI = function()
 		if Library and Library.Toggle then Library:Toggle() end
 	end
-else
-	warn("[centerra] Library failed")
 end
 
-print("[centerra] loading combat core…")
 
+-------------------------------------------------------------------------------
+-- Combat core (isolated loadstring — cannot break UI parse)
+-------------------------------------------------------------------------------
+task.defer(function()
+	print("[centerra] loading combat core…")
+	local fn, err = loadstring([=[
 -- centerra v1.4.1 (build 7.4.1) · licence id=51 · 
 pcall(function() (getgenv and getgenv() or _G).CenterraEdition = "normal" end)
 --[[
@@ -32484,8 +32513,7 @@ genv().CenterraInit = function()
 	end
 	function Menu.toggle()
 		do
-			local g = genv()
-			local L = g.CenterraLibrary
+			local L = genv().CenterraLibrary
 			if type(L) == "table" and type(L.Toggle) == "function" then
 				pcall(L.Toggle)
 				return
@@ -40224,22 +40252,25 @@ if not initOk then
 end
 
 
-
-task.spawn(function()
-	local t0 = os.clock()
-	while os.clock() - t0 < 45 do
-		local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
-		if type(g) == "table" and type(g.CenterraState) == "table" and type(g.CenterraState.cfg) == "table" then
-			if type(g._CenterraCfgFallback) == "table" then
-				for k, v in pairs(g._CenterraCfgFallback) do
-					g.CenterraState.cfg[k] = v
-				end
-				g._CenterraCfgFallback = nil
-				print("[centerra] UI toggles synced into combat cfg")
+]=], "centerra_combat")
+	if not fn then
+		warn("[centerra] combat compile: " .. tostring(err))
+		return
+	end
+	local ok, result = pcall(fn)
+	if not ok then
+		warn("[centerra] combat run: " .. tostring(result))
+		return
+	end
+	print("[centerra] combat core live")
+	local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
+	if type(g) == "table" and type(g.CenterraState) == "table" and type(g.CenterraState.cfg) == "table" then
+		if type(g._CenterraCfgFallback) == "table" then
+			for k, v in pairs(g._CenterraCfgFallback) do
+				g.CenterraState.cfg[k] = v
 			end
-			print("[centerra] combat cfg online")
-			return
+			g._CenterraCfgFallback = nil
+			print("[centerra] cfg synced")
 		end
-		task.wait(0.2)
 	end
 end)
