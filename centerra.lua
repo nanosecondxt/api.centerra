@@ -1,13 +1,29 @@
 --[[
-	Centerra v1.0.0 · RIVALS
-	Linoria UI · full combat core · no malware · no telemetry
-	RightShift toggles menu
+	Centerra v1.0 — RIVALS
+	Clean Linoria UI. Opens on load. RightShift toggles.
 ]]
 
--------------------------------------------------------------------------------
--- Centerra boot: Linoria UI first, then combat core
--------------------------------------------------------------------------------
-local Library = (function()
+pcall(function()
+	local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
+	if type(g) == "table" and type(g.Library) == "table" and type(g.Library.Unload) == "function" then
+		pcall(function() g.Library:Unload() end)
+	end
+end)
+
+print("[centerra] booting…")
+
+local Library
+do
+	local fn, err = loadstring([=[
+local function _genv()
+	if type(getgenv) == "function" then
+		local ok, env = pcall(getgenv)
+		if ok and type(env) == "table" then return env end
+	end
+	return _G
+end
+local getgenv = function() return _genv() end
+
 local InputService = game:GetService('UserInputService');
 local TextService = game:GetService('TextService');
 local CoreGui = game:GetService('CoreGui');
@@ -17,7 +33,7 @@ local RunService = game:GetService('RunService')
 local TweenService = game:GetService('TweenService');
 local Lighting = game:GetService('Lighting');
 local RenderStepped = RunService.RenderStepped;
-local LocalPlayer = Players.LocalPlayer;
+local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait();
 local Mouse = LocalPlayer:GetMouse();
 
 local OldLibrary = getgenv().Library;
@@ -34,7 +50,24 @@ local ProtectGui = protectgui or (syn and syn.protect_gui) or (function() end);
 local ScreenGui = Instance.new('ScreenGui');
 ProtectGui(ScreenGui);
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global;
-ScreenGui.Parent = CoreGui;
+ScreenGui.DisplayOrder = 9999;
+do
+	local parent = CoreGui
+	pcall(function()
+		local gh = rawget(_G, "gethui") or rawget(_G, "get_hidden_gui")
+		if type(gh) ~= "function" and type(getgenv) == "function" then
+			local ok, env = pcall(getgenv)
+			if ok and type(env) == "table" then
+				gh = env.gethui or env.get_hidden_gui
+			end
+		end
+		if type(gh) == "function" then
+			local h = gh()
+			if h then parent = h end
+		end
+	end)
+	ScreenGui.Parent = parent
+end
 
 local Toggles = {};
 local Options = {};
@@ -104,7 +137,14 @@ do
     OverlayGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
     OverlayGui.DisplayOrder = -9999
     ProtectGui(OverlayGui)
-    OverlayGui.Parent = CoreGui
+    do
+        local parent = CoreGui
+        pcall(function()
+            local gh = rawget(_G, "gethui") or rawget(_G, "get_hidden_gui")
+            if type(gh) == "function" then local h = gh(); if h then parent = h end end
+        end)
+        OverlayGui.Parent = parent
+    end
 
     Library.DarkOverlay = Instance.new("Frame")
     Library.DarkOverlay.Name = "DarkOverlay"
@@ -4099,7 +4139,14 @@ if InputService.TouchEnabled then
     MobileGui.Name = "CenterraMobileUI"
     MobileGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
     ProtectGui(MobileGui)
-    MobileGui.Parent = CoreGui
+    do
+        local parent = CoreGui
+        pcall(function()
+            local gh = rawget(_G, "gethui") or rawget(_G, "get_hidden_gui")
+            if type(gh) == "function" then local h = gh(); if h then parent = h end end
+        end)
+        MobileGui.Parent = parent
+    end
 
     local BTN_W, BTN_H = 88, 30
     local BTN_GAP      = 40  
@@ -4241,9 +4288,32 @@ end
 
 getgenv().Library = Library
 return Library
-end)()
+]=], "centerra_linoria")
+	if not fn then
+		warn("[centerra] linoria compile: " .. tostring(err))
+	else
+		local ok, result = pcall(fn)
+		if not ok then
+			warn("[centerra] linoria run: " .. tostring(result))
+		else
+			Library = result
+			if type(Library) ~= "table" then
+				local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
+				Library = type(g) == "table" and g.Library or nil
+			end
+		end
+	end
+end
 
-local buildMenu = (function()
+if type(Library) ~= "table" or type(Library.CreateWindow) ~= "function" then
+	warn("[centerra] Library failed — cannot open UI")
+	return
+end
+print("[centerra] linoria ready")
+
+local buildMenu
+do
+	local fn, err = loadstring([=[
 --[[
 	Centerra Menu — Linoria-based, wired to live CenterraState.cfg
 ]]
@@ -4556,6 +4626,12 @@ return function(Library)
 
 	syncFallback()
 	Library:Notify("centerra loaded", 4)
+	-- force visible
+	if not Library.Toggled then
+		task.defer(function()
+			pcall(function() Library:Toggle() end)
+		end)
+	end
 	print("[centerra] Linoria menu live — RightShift toggles")
 
 	getG().CenterraToggleUI = function()
@@ -4566,17 +4642,58 @@ return function(Library)
 	return Window
 end
 
-end)()
+]=], "centerra_menu")
+	if not fn then
+		warn("[centerra] menu compile: " .. tostring(err))
+	else
+		local ok, result = pcall(fn)
+		if ok then buildMenu = result else warn("[centerra] menu run: " .. tostring(result)) end
+	end
+end
 
-task.spawn(function()
+local function recovery(msg)
+	local Window = Library:CreateWindow({
+		Title = "centerra",
+		Center = true,
+		AutoShow = true,
+		Size = UDim2.fromOffset(520, 400),
+	})
+	local tab = Window:AddTab("Main")
+	local box = tab:AddLeftGroupbox("Status")
+	box:AddLabel(tostring(msg):sub(1, 100))
+	Library:Notify("centerra recovery UI", 5)
+	print("[centerra] recovery UI up")
+end
+
+if type(buildMenu) ~= "function" then
+	recovery("menu builder missing")
+else
 	local ok, err = pcall(buildMenu, Library)
 	if not ok then
-		warn("[centerra] menu failed: " .. tostring(err))
+		warn("[centerra] buildMenu: " .. tostring(err))
+		recovery(err)
+	else
+		print("[centerra] menu live — RightShift toggles")
 	end
-end)
+end
 
--- combat core follows
+local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
+if type(g) ~= "table" then g = _G end
+g.CenterraLibrary = Library
+g.CenterraToggleUI = function()
+	if Library and Library.Toggle then Library:Toggle() end
+end
+g.CenterraUnloadUI = function()
+	if Library and Library.Unload then Library:Unload() end
+end
 
+
+-------------------------------------------------------------------------------
+-- Combat core (loads after UI so menu always works)
+-------------------------------------------------------------------------------
+task.spawn(function()
+	print("[centerra] loading combat core…")
+	local fn, err = loadstring([=[
 -- centerra v1.4.1 (build 7.4.1) · licence id=51 · 
 pcall(function() (getgenv and getgenv() or _G).CenterraEdition = "normal" end)
 --[[
@@ -32343,13 +32460,12 @@ genv().CenterraInit = function()
 		notify("menu failed: " .. msg, 8, "error")
 	end
 	function Menu.toggle()
-
-		if getgenv and getgenv().CenterraLibrary then
-			-- Linoria owns the menu
-			local L = getgenv().CenterraLibrary
-			if L and L.Toggle then pcall(L.Toggle) end
+		local L = (type(getgenv) == "function" and getgenv().CenterraLibrary) or nil
+		if L and L.Toggle then
+			pcall(L.Toggle)
 			return
-		end		local now = os.clock()
+		end
+		local now = os.clock()
 		if now - (Menu._toggleAt or 0) < 0.2 then
 			return
 		end
@@ -39994,7 +40110,7 @@ genv().CenterraInit = function()
 	-- path the key handler takes (rebuild if the GUI is gone, then open), a beat later so the load
 	-- toasts, the intro and the camera hooks are done first.
 	task.delay(1, function()
-		-- Linoria menu handles open; skip old Menu.toggle
+		-- Linoria owns the menu
 	end)
 	if Configs.firstRun then
 		-- a brand-new install starts ESP only (DEFAULTS): say where the rest is
@@ -40077,4 +40193,26 @@ if not initOk then
 		b.Font = if okF and font then font else Enum.Font.GothamBold
 	end)
 end
+
+
+]=], "centerra_combat")
+	if not fn then
+		warn("[centerra] combat compile: " .. tostring(err))
+		return
+	end
+	local ok, result = pcall(fn)
+	if not ok then
+		warn("[centerra] combat run: " .. tostring(result))
+		return
+	end
+	print("[centerra] combat core live")
+	local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
+	if type(g) == "table" and type(g._CenterraCfgFallback) == "table" and type(g.CenterraState) == "table" and type(g.CenterraState.cfg) == "table" then
+		for k, v in pairs(g._CenterraCfgFallback) do
+			g.CenterraState.cfg[k] = v
+		end
+		g._CenterraCfgFallback = nil
+		print("[centerra] cfg synced")
+	end
+end)
 
