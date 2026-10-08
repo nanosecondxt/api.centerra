@@ -4722,3 +4722,227 @@ g.CenterraUnloadUI = function()
 end
 
 print("[centerra] UI only loaded (no combat — no crash)")
+
+
+-------------------------------------------------------------------------------
+-- Centerra live features (reads getgenv().CenterraCfg / CenterraState.cfg)
+-- Light path first so toggles DO something without the full hook stack.
+-------------------------------------------------------------------------------
+task.spawn(function()
+	local Players = game:GetService("Players")
+	local RunService = game:GetService("RunService")
+	local UIS = game:GetService("UserInputService")
+	local LP = Players.LocalPlayer
+	local Camera = workspace.CurrentCamera
+
+	local function cfg()
+		local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
+		if type(g) ~= "table" then g = _G end
+		if type(g.CenterraState) == "table" and type(g.CenterraState.cfg) == "table" then
+			return g.CenterraState.cfg
+		end
+		g.CenterraCfg = g.CenterraCfg or {}
+		return g.CenterraCfg
+	end
+
+	local drawings = {}
+	local function clearDraw()
+		for _, d in pairs(drawings) do
+			pcall(function() d:Remove() end)
+		end
+		table.clear(drawings)
+	end
+
+	local function getChar(p)
+		local c = p.Character
+		if not c then return end
+		local hrp = c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("HRP")
+		local hum = c:FindFirstChildOfClass("Humanoid")
+		return c, hrp, hum
+	end
+
+	local function teamOk(p, c)
+		if c.teamCheck == false then return true end
+		if p.Team and LP.Team and p.Team == LP.Team then return false end
+		return true
+	end
+
+	-- ESP loop
+	RunService.RenderStepped:Connect(function()
+		local c = cfg()
+		if not c.esp then
+			clearDraw()
+			return
+		end
+		if type(Drawing) ~= "table" and type(Drawing) ~= "userdata" then
+			-- fallback Highlight only
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p ~= LP and teamOk(p, c) then
+					local ch = p.Character
+					if ch then
+						local h = ch:FindFirstChild("CenterraHL")
+						if c.espHighlight then
+							if not h then
+								h = Instance.new("Highlight")
+								h.Name = "CenterraHL"
+								h.FillTransparency = 0.7
+								h.OutlineTransparency = 0
+								h.FillColor = Color3.fromRGB(180, 185, 195)
+								h.OutlineColor = Color3.fromRGB(255, 255, 255)
+								h.Parent = ch
+							end
+						elseif h then
+							h:Destroy()
+						end
+					end
+				end
+			end
+			return
+		end
+
+		local used = {}
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= LP and teamOk(p, c) then
+				local ch, hrp, hum = getChar(p)
+				if hrp and Camera then
+					local sp, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+					if onScreen and sp.Z > 0 then
+						local key = p.Name
+						local box = drawings[key .. "_box"]
+						if c.espBox then
+							if not box then
+								box = Drawing.new("Square")
+								box.Thickness = 1
+								box.Filled = false
+								box.Color = Color3.fromRGB(220, 220, 230)
+								box.Visible = true
+								drawings[key .. "_box"] = box
+							end
+							local scale = 1000 / math.max(sp.Z, 1)
+							local h = math.clamp(scale * 3, 12, 200)
+							local w = h * 0.6
+							box.Size = Vector2.new(w, h)
+							box.Position = Vector2.new(sp.X - w / 2, sp.Y - h / 2)
+							box.Visible = true
+							used[key .. "_box"] = true
+						elseif box then
+							box.Visible = false
+						end
+
+						local name = drawings[key .. "_name"]
+						if c.espNames then
+							if not name then
+								name = Drawing.new("Text")
+								name.Size = 14
+								name.Center = true
+								name.Outline = true
+								name.Color = Color3.fromRGB(235, 236, 240)
+								name.Visible = true
+								drawings[key .. "_name"] = name
+							end
+							local label = p.Name
+							if c.espDistance then
+								local dist = (hrp.Position - Camera.CFrame.Position).Magnitude
+								label = string.format("%s [%.0f]", p.Name, dist)
+							end
+							if c.espHealthBar and hum then
+								label = label .. string.format(" %.0fhp", hum.Health)
+							end
+							name.Text = label
+							name.Position = Vector2.new(sp.X, sp.Y - (box and box.Size.Y / 2 or 20) - 14)
+							name.Visible = true
+							used[key .. "_name"] = true
+						elseif name then
+							name.Visible = false
+						end
+					end
+				end
+			end
+		end
+		for k, d in pairs(drawings) do
+			if not used[k] then
+				pcall(function() d.Visible = false end)
+			end
+		end
+	end)
+
+	-- FOV circle
+	local fovCircle
+	pcall(function()
+		if type(Drawing) == "table" or type(Drawing) == "userdata" then
+			fovCircle = Drawing.new("Circle")
+			fovCircle.Thickness = 1
+			fovCircle.Filled = false
+			fovCircle.NumSides = 64
+			fovCircle.Color = Color3.fromRGB(180, 185, 195)
+		end
+	end)
+	RunService.RenderStepped:Connect(function()
+		local c = cfg()
+		if not fovCircle then return end
+		if c.showFov and (c.aimbot or c.silentAim) then
+			local r = tonumber(c.silentAim and c.silentFov or c.aimFov) or 140
+			fovCircle.Radius = r
+			fovCircle.Position = UIS:GetMouseLocation()
+			fovCircle.Visible = true
+		else
+			fovCircle.Visible = false
+		end
+	end)
+
+	-- Fullbright
+	local Lighting = game:GetService("Lighting")
+	local oldAmbient, oldBrightness = Lighting.Ambient, Lighting.Brightness
+	RunService.Heartbeat:Connect(function()
+		local c = cfg()
+		if c.fullbright then
+			Lighting.Ambient = Color3.new(1, 1, 1)
+			Lighting.Brightness = 2
+		end
+		if c.noFog then
+			Lighting.FogEnd = 1e6
+		end
+	end)
+
+	-- FOV changer
+	RunService.RenderStepped:Connect(function()
+		local c = cfg()
+		if c.fovChanger and Camera then
+			Camera.FieldOfView = tonumber(c.fov) or 90
+		end
+	end)
+
+	-- Soft aimbot (camera push toward closest enemy in FOV)
+	RunService.RenderStepped:Connect(function()
+		local c = cfg()
+		if not c.aimbot or not Camera then return end
+		-- only while right mouse / aim held optional — always soft for now if enabled
+		local best, bestDist
+		local mouse = UIS:GetMouseLocation()
+		local fov = tonumber(c.aimFov) or 140
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= LP and teamOk(p, c) then
+				local ch, hrp = getChar(p)
+				if hrp then
+					local sp, on = Camera:WorldToViewportPoint(hrp.Position)
+					if on and sp.Z > 0 then
+						local d = (Vector2.new(sp.X, sp.Y) - mouse).Magnitude
+						if d <= fov and (not bestDist or d < bestDist) then
+							bestDist = d
+							best = hrp
+						end
+					end
+				end
+			end
+		end
+		if best then
+			local smooth = math.max(tonumber(c.aimSmooth) or 4, 1)
+			local goal = CFrame.new(Camera.CFrame.Position, best.Position)
+			Camera.CFrame = Camera.CFrame:Lerp(goal, 1 / smooth)
+		end
+	end)
+
+	print("[centerra] light features live (ESP / aimbot / FOV / fullbright)")
+	print("[centerra] enable ESP or Aimbot in the menu — you should see results")
+end)
+
