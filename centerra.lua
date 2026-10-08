@@ -1,7 +1,7 @@
 --[[
 	Centerra v1.0 — RIVALS
-	Linoria UI + full combat core from cocaine source
-	RightShift toggles menu
+	Linoria UI + full combat core
+	RightShift toggles · buttons write live cfg · mouse freed while menu open
 ]]
 
 pcall(function()
@@ -2306,9 +2306,12 @@ do
             SortOrder = Enum.SortOrder.LayoutOrder;
             Parent = ToggleLabel;
         });
-        local ToggleRegion = Library:Create('Frame', {
+        local ToggleRegion = Library:Create('TextButton', {
             BackgroundTransparency = 1;
-            Size = UDim2.new(0, 170, 1, 0);
+            Text = '';
+            AutoButtonColor = false;
+            Size = UDim2.new(0, 220, 0, 16);
+            Position = UDim2.new(0, 0, 0, -1);
             ZIndex = 8;
             Parent = ToggleOuter;
         });
@@ -2352,12 +2355,19 @@ do
             Library:SafeCallback(Toggle.Changed, Toggle.Value);
             Library:UpdateDependencyBoxes();
         end;
+        local function toggleClick()
+            if Library:MouseIsOverOpenedFrame() then return end
+            Toggle:SetValue(not Toggle.Value)
+            Library:AttemptSave()
+        end
         ToggleRegion.InputBegan:Connect(function(Input)
-            if (Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch) and not Library:MouseIsOverOpenedFrame() then
-                Toggle:SetValue(not Toggle.Value)
-                Library:AttemptSave();
-            end;
-        end);
+            if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+                toggleClick()
+            end
+        end)
+        if ToggleRegion:IsA('TextButton') then
+            ToggleRegion.MouseButton1Click:Connect(toggleClick)
+        end
         if Toggle.Risky then
             Library:RemoveFromRegistry(ToggleLabel)
             ToggleLabel.TextColor3 = Library.RiskColor
@@ -4294,21 +4304,19 @@ return Library
 		warn("[centerra] linoria compile: " .. tostring(err))
 	else
 		local ok, result = pcall(fn)
-		if not ok then
-			warn("[centerra] linoria run: " .. tostring(result))
-		else
+		if ok then
 			Library = result
 			if type(Library) ~= "table" then
 				local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
 				Library = type(g) == "table" and g.Library or nil
 			end
+		else
+			warn("[centerra] linoria run: " .. tostring(result))
 		end
 	end
 end
 
-if type(Library) ~= "table" or type(Library.CreateWindow) ~= "function" then
-	warn("[centerra] Library failed")
-else
+if type(Library) == "table" and type(Library.CreateWindow) == "function" then
 	print("[centerra] linoria ready")
 	local buildMenu
 	do
@@ -4327,26 +4335,46 @@ local function getCfg()
 	if type(st) == "table" and type(st.cfg) == "table" then
 		return st.cfg, st
 	end
-	g._CenterraCfgFallback = g._CenterraCfgFallback or {
-		aimbot = false, aimFov = 140, aimSmooth = 4, aimStrength = 100,
-		stickyAim = false, teamCheck = true, legitTrigger = false, legitTriggerDelayMs = 90,
-		silentAim = false, silentFov = 160, silentFov360 = false, silentHitChance = 100,
-		silentWallbang = false, resolver = true, antiUnder = true,
-		autoShoot = true, autoShootHold = true, autoShootChance = 100,
-		rageEnabled = false, magicBullet = true, autokill = false, voidSpam = false,
-		defenseHide = true, meleeRage = true, noclip = false,
-		noSpread = false, noRecoil = false, rapidFire = false, rapidFireMult = 0.5,
-		esp = true, espBox = true, espNames = true, espHealthBar = true, espDistance = true,
-		espWeapon = true, espTracers = false, espArrows = true, espSkeleton = false, espHighlight = true,
-		showFov = true, hitMarkers = true, killFeed = true, radar = false, hud = true,
-		fullbright = false, nightMode = false, noFog = false, fovChanger = false, fov = 90,
-		thirdPerson = false, noPostFx = false, hideViewmodel = false,
-		speedBoost = false, speedMult = 1.25, bhop = false, infSlide = false, noSlow = false,
-		antiAfk = true, autoRejoin = false, unlockCosmetics = false, aaEnabled = false,
-		targetPriority = "Closest", ragePosition = "Magic bullet", aaMode = "Auto",
-		espBoxStyle = "Corner", autokillMode = "Origin",
-	}
+	g._CenterraCfgFallback = g._CenterraCfgFallback or {}
 	return g._CenterraCfgFallback, st
+end
+
+local function writeCfg(key, value)
+	local g = getG()
+	local st = g.CenterraState
+	-- always write fallback
+	g._CenterraCfgFallback = g._CenterraCfgFallback or {}
+	g._CenterraCfgFallback[key] = value
+	-- write live combat cfg when ready
+	if type(st) == "table" and type(st.cfg) == "table" then
+		st.cfg[key] = value
+		-- derived switches the combat sanitize expects
+		if key == "rageEnabled" or key == "ragePosition" or key == "magicBullet" or key == "autokill" then
+			if key == "magicBullet" and value == true then
+				st.cfg.ragePosition = "Magic bullet"
+				st.cfg.rageEnabled = true
+				st.cfg.silentAim = true
+			end
+			if key == "autokill" and value == true then
+				st.cfg.ragePosition = "Autokill"
+				st.cfg.rageEnabled = true
+				st.cfg.autokillAuto = true
+				st.cfg.silentAim = true
+			end
+			if key == "rageEnabled" and value == true and (st.cfg.ragePosition == nil or st.cfg.ragePosition == "None") then
+				st.cfg.ragePosition = "Magic bullet"
+				st.cfg.silentAim = true
+			end
+		end
+		if key == "silentAim" and value == true then
+			-- nothing else
+		end
+		if key == "noSpread" then
+			st.cfg.noSpreadStraighten = value
+			st.cfg.spreadClaimAim = value
+			st.cfg.spreadStillShot = value
+		end
+	end
 end
 
 local function setMenuFlag(v)
@@ -4379,8 +4407,8 @@ local function bindToggle(idx, key, info)
 	info.Default = cfg[key] == true
 	local old = info.Callback
 	info.Callback = function(v)
-		local c = getCfg()
-		c[key] = v
+		writeCfg(key, v)
+		print("[centerra] toggle", key, "=", tostring(v))
 		if old then old(v) end
 	end
 	return info
@@ -4392,8 +4420,7 @@ local function bindSlider(idx, key, info)
 	if d then info.Default = d end
 	local old = info.Callback
 	info.Callback = function(v)
-		local c = getCfg()
-		c[key] = v
+		writeCfg(key, v)
 		if old then old(v) end
 	end
 	return info
@@ -4404,8 +4431,7 @@ local function bindDropdown(idx, key, info)
 	if type(cfg[key]) == "string" then info.Default = cfg[key] end
 	local old = info.Callback
 	info.Callback = function(v)
-		local c = getCfg()
-		c[key] = v
+		writeCfg(key, v)
 		if old then old(v) end
 	end
 	return info
@@ -4625,6 +4651,22 @@ return function(Library)
 
 	syncFallback()
 	Library:Notify("centerra loaded", 4)
+
+	-- keep mouse free + S.menuOpen in sync while Linoria is open (combat locks mouse otherwise)
+	local UIS = game:GetService("UserInputService")
+	local RS = game:GetService("RunService")
+	Library:GiveSignal(RS.RenderStepped:Connect(function()
+		if Library.Toggled then
+			setMenuFlag(true)
+			if UIS.MouseBehavior ~= Enum.MouseBehavior.Default then
+				UIS.MouseBehavior = Enum.MouseBehavior.Default
+			end
+			-- don't force MouseIconEnabled; Linoria draws its own cursor
+		else
+			setMenuFlag(false)
+		end
+	end))
+
 	-- force visible
 	if not Library.Toggled then
 		task.defer(function()
@@ -4642,27 +4684,20 @@ return function(Library)
 end
 
 ]=], "centerra_menu")
-		if not fn then
-			warn("[centerra] menu compile: " .. tostring(err))
-		else
+		if fn then
 			local ok, result = pcall(fn)
-			if ok then buildMenu = result else warn("[centerra] menu run: " .. tostring(result)) end
+			if ok then buildMenu = result end
+		else
+			warn("[centerra] menu compile: " .. tostring(err))
 		end
 	end
 	if type(buildMenu) == "function" then
 		local ok, err = pcall(buildMenu, Library)
-		if not ok then
-			warn("[centerra] buildMenu: " .. tostring(err))
-		else
+		if ok then
 			print("[centerra] menu live — RightShift toggles")
+		else
+			warn("[centerra] buildMenu: " .. tostring(err))
 		end
-	else
-		-- recovery window
-		pcall(function()
-			local Window = Library:CreateWindow({ Title = "centerra", Center = true, AutoShow = true, Size = UDim2.fromOffset(520, 400) })
-			local tab = Window:AddTab("Main")
-			tab:AddLeftGroupbox("Status"):AddLabel("menu builder failed")
-		end)
 	end
 	local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
 	if type(g) ~= "table" then g = _G end
@@ -4670,13 +4705,11 @@ end
 	g.CenterraToggleUI = function()
 		if Library and Library.Toggle then Library:Toggle() end
 	end
+else
+	warn("[centerra] Library failed")
 end
 
-print("[centerra] loading combat core (live)…")
-
--------------------------------------------------------------------------------
--- FULL COMBAT CORE (cocaine source, cleaned) — runs as real code, not a string
--------------------------------------------------------------------------------
+print("[centerra] loading combat core…")
 
 -- centerra v1.4.1 (build 7.4.1) · licence id=51 · 
 pcall(function() (getgenv and getgenv() or _G).CenterraEdition = "normal" end)
@@ -22666,7 +22699,13 @@ genv().CenterraInit = function()
 	-- (nothing to restore, nothing left locked). _InputChanged turns the camera by mouse deltas the game
 	-- did not process, i.e. whenever the cursor was beside the window: dropped while the menu is open.
 	h.menuMouse = function(): boolean
-		return S.alive ~= false and S.menuOpen == true
+		if S.alive == false then return false end
+		local L = genv().CenterraLibrary
+		if type(L) == "table" and L.Toggled == true then
+			S.menuOpen = true
+			return true
+		end
+		return S.menuOpen == true
 	end
 	function Hooks.installMenuMouse()
 		if not installed.menuModal and type(CameraController._Modal) == "function" then
@@ -32445,8 +32484,8 @@ genv().CenterraInit = function()
 	end
 	function Menu.toggle()
 		do
-			local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
-			local L = type(g) == "table" and g.CenterraLibrary
+			local g = genv()
+			local L = g.CenterraLibrary
 			if type(L) == "table" and type(L.Toggle) == "function" then
 				pcall(L.Toggle)
 				return
@@ -32484,6 +32523,10 @@ genv().CenterraInit = function()
 	-- runs Roblox's default camera, which pins the mouse to the centre every frame, Modal button or not
 	-- (measured) — it puts the cursor back before the frame renders.
 	function UI.mouseTick()
+		local L = genv().CenterraLibrary
+		if type(L) == "table" and L.Toggled == true then
+			S.menuOpen = true
+		end
 		if not S.menuOpen or S.alive == false then
 			return
 		end
@@ -35981,12 +36024,7 @@ genv().CenterraInit = function()
 	end
 
 	function Menu.build()
-		do
-			local g = (type(getgenv) == "function" and select(2, pcall(getgenv))) or _G
-			if type(g) == "table" and g.CenterraLibrary then
-				return -- Linoria is the menu
-			end
-		end
+		if genv().CenterraLibrary then return end
 		UI.resetRegistries()
 		Menu.syncMarks = {}
 		UI.syncTab = {} -- sync index → the page that registered it (nil = global)
@@ -40187,10 +40225,6 @@ end
 
 
 
-
--------------------------------------------------------------------------------
--- cfg bridge: UI fallback → live CenterraState.cfg
--------------------------------------------------------------------------------
 task.spawn(function()
 	local t0 = os.clock()
 	while os.clock() - t0 < 45 do
@@ -40203,12 +40237,9 @@ task.spawn(function()
 				g._CenterraCfgFallback = nil
 				print("[centerra] UI toggles synced into combat cfg")
 			end
-			-- keep writing through live cfg
 			print("[centerra] combat cfg online")
 			return
 		end
 		task.wait(0.2)
 	end
-	warn("[centerra] combat state never appeared")
 end)
-
